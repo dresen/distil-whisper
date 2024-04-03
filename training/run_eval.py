@@ -31,7 +31,6 @@ import evaluate
 import numpy as np
 import torch
 import transformers
-from accelerate.utils import is_tensorboard_available
 from datasets import DatasetDict, IterableDatasetDict, load_dataset
 from tqdm import tqdm
 from transformers import (
@@ -42,7 +41,7 @@ from transformers import (
     pipeline,
     set_seed,
 )
-from transformers.models.whisper.english_normalizer import EnglishTextNormalizer
+from transformers.models.whisper.english_normalizer import EnglishTextNormalizer, BasicTextNormalizer
 from transformers.models.whisper.modeling_whisper import WhisperForCausalLM
 from transformers.utils import check_min_version, is_accelerate_available
 from transformers.utils.versions import require_version
@@ -423,7 +422,7 @@ def main():
             "logprob_threshold": data_args.logprob_threshold,
             "no_speech_threshold": data_args.no_speech_threshold,
             "use_pipeline": data_args.use_pipeline,
-            "chunk_length_s": data_args.chunk_length_s
+            "chunk_length_s": data_args.chunk_length_s,
         }
 
         # Set up wandb run
@@ -543,8 +542,10 @@ def main():
     # 7. Preprocessing the datasets.
     # We need to read the audio files as arrays and tokenize the targets.
     audio_column_name = data_args.audio_column_name
-    num_workers = data_args.preprocessing_num_workers
-    normalizer = EnglishTextNormalizer(processor.tokenizer.english_spelling_normalizer)
+    normalizer = (
+        BasicTextNormalizer() if data_args.language is not None
+        else EnglishTextNormalizer(processor.tokenizer.english_spelling_normalizer)
+    )
     sampling_rate = processor.feature_extractor.sampling_rate
 
     if data_args.samples_per_dataset is not None:

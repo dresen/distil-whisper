@@ -130,13 +130,14 @@ class ModelArguments:
         default=None,
         metadata={
             "help": (
-            "Which attention implementation to use in the encoder and decoder attention layers. Can be one of:\n"
-            "1. `eager` or `None`: default Transformers attention implementation.\n"
-            "2. `sdpa`: Flash Attention through PyTorch SDPA. Requires `torch>=2.1`. Recommended for hardware where Flash Attention 2 is not supported, e.g. Turing GPUs, (T4, RTX 2080).\n"
-            "3. `flash_attn_2`: Flash Attention 2 through the Flash Attention package https://github.com/Dao-AILab/flash-attention. **Always** recommended on supported hardware (Ampere, Ada, or Hopper GPUs, e.g., A100, RTX 3090, RTX 4090, H100)."
-        )
+                "Which attention implementation to use in the encoder and decoder attention layers. Can be one of:\n"
+                "1. `eager` or `None`: default Transformers attention implementation.\n"
+                "2. `sdpa`: Flash Attention through PyTorch SDPA. Requires `torch>=2.1`. Recommended for hardware where Flash Attention 2 is not supported, e.g. Turing GPUs, (T4, RTX 2080).\n"
+                "3. `flash_attn_2`: Flash Attention 2 through the Flash Attention package https://github.com/Dao-AILab/flash-attention. **Always** recommended on supported hardware (Ampere, Ada, or Hopper GPUs, e.g., A100, RTX 3090, RTX 4090, H100)."
+            )
         },
     )
+
     def __post_init__(self):
         if self.attn_implementation not in [None, "eager", "sdpa", "flash_attention_2"]:
             raise ValueError(
@@ -854,9 +855,11 @@ def main():
     if training_args.do_eval:
         dataset_names_dict = convert_dataset_str_to_list(
             data_args.eval_dataset_name if data_args.eval_dataset_name else data_args.train_dataset_name,
-            data_args.eval_dataset_config_name
-            if data_args.eval_dataset_config_name
-            else data_args.train_dataset_config_name,
+            (
+                data_args.eval_dataset_config_name
+                if data_args.eval_dataset_config_name
+                else data_args.train_dataset_config_name
+            ),
             splits=data_args.eval_split_name,
             text_column_names=data_args.eval_text_column_name,
         )
@@ -1050,7 +1053,9 @@ def main():
 
     metric = evaluate.load("wer")
     normalizer = (
-        BasicTextNormalizer() if data_args.language is not None else EnglishTextNormalizer(tokenizer.english_spelling_normalizer)
+        BasicTextNormalizer()
+        if data_args.language is not None
+        else EnglishTextNormalizer(tokenizer.english_spelling_normalizer)
     )
     wer_threshold = data_args.wer_threshold
     use_pseudo_labels = data_args.use_pseudo_labels
@@ -1093,11 +1098,12 @@ def main():
     )
 
     if wer_threshold is not None and use_pseudo_labels:
-        raw_datasets["train"] = (
-            filter_by_wer_threshold(num_proc=num_workers, desc="filtering train dataset by wer")
-            if not data_args.streaming
-            else filter_by_wer_threshold()
-        )
+        with accelerator.main_process_first():
+            raw_datasets["train"] = (
+                filter_by_wer_threshold(num_proc=num_workers, desc="filtering train dataset by wer")
+                if not data_args.streaming
+                else filter_by_wer_threshold()
+            )
 
     # 10.4: pre-process training/evaluation datasets
     def prepare_train_dataset(batch):
@@ -1188,7 +1194,7 @@ def main():
             batched=True,
             batch_size=data_args.preprocessing_batch_size,
         )
-        if accelerator.is_main_process:
+        with accelerator.main_process_first():
             vectorized_datasets["train"] = (
                 map_fn_train(num_proc=num_workers, desc="preprocess train dataset")
                 if not data_args.streaming
@@ -1200,7 +1206,7 @@ def main():
             map_fn_eval = partial(
                 raw_datasets[eval_split].map, function=prepare_eval_dataset, remove_columns=raw_datasets_eval_features
             )
-            if accelerator.is_main_process:
+            with accelerator.main_process_first():
                 vectorized_datasets[eval_split] = (
                     map_fn_eval(num_proc=num_workers, desc="preprocess eval dataset")
                     if not data_args.streaming
@@ -1214,7 +1220,7 @@ def main():
     filter_by_audio_fn = partial(
         vectorized_datasets.filter, function=is_audio_in_length_range, input_columns=["input_length"]
     )
-    if accelerator.is_main_process:
+    with accelerator.main_process_first():
         vectorized_datasets = (
             filter_by_audio_fn(num_proc=num_workers, desc="filtering train dataset by audio length")
             if not data_args.streaming
@@ -1228,7 +1234,7 @@ def main():
     filter_by_labels_fn = partial(
         vectorized_datasets.filter, function=is_labels_in_length_range, input_columns=["labels"]
     )
-    if accelerator.is_main_process:
+    with accelerator.main_process_first():
         vectorized_datasets = (
             filter_by_labels_fn(num_proc=num_workers, desc="filtering train dataset")
             if not data_args.streaming
@@ -1518,7 +1524,6 @@ def main():
             num_workers=dataloader_num_workers,
             prefetch_factor=prefetch_factor,
             pin_memory=training_args.dataloader_pin_memory,
-
         )
         train_dataloader = accelerator.prepare(train_dataloader)
         if hasattr(train_dataloader, "dataset") and isinstance(train_dataloader.dataset, IterableDataset):
